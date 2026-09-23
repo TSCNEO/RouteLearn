@@ -91,4 +91,13 @@ cd frontend && npm ci && npm run build && cd ..
 docker build -t routelearn:local .
 ```
 
+To verify the packaged server and SQLite persistence in an isolated Compose project:
+
+```sh
+docker build -t routelearn:ci .
+python3 tests/docker_server.py
+```
+
+On Linux, `tests/docker_capture.py` and `tests/docker_adguard.py` additionally verify passive capture from a host resolver, a bridged resolver, and both optional AdGuard stacks. These tests create and remove only their own Docker projects and volumes.
+
 The local API is under `/api/v1`, with OpenAPI at `/docs`. Health endpoints are `/healthz` and `/readyz`. Docker images are published only for tagged releases.

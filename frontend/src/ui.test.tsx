@@ -40,3 +40,32 @@ test('agent token remains visible after the post-create data refresh', async () 
   await waitFor(() => expect(screen.getByText('one-time-agent-token')).toBeTruthy())
   expect(fetchMock).toHaveBeenCalledWith('/api/v1/agents', expect.objectContaining({ method: 'POST' }))
 })
+
+test('learning mode creates an editable service without a router', async () => {
+  vi.stubGlobal('EventSource', class { close() {} })
+  const services: { id: number; name: string; patterns: string[]; live_window_hours: number; warmup_window_hours: number; retention_days: number }[] = []
+  const fetchMock = vi.fn(async (input: string, init?: RequestInit) => {
+    const path = String(input)
+    let data: unknown = {}
+    if (path.endsWith('/auth/status')) data = { needs_setup: false }
+    else if (path.endsWith('/auth/me')) data = { username: 'admin' }
+    else if (path.endsWith('/services') && init?.method === 'POST') {
+      const body = JSON.parse(String(init.body))
+      services.push({ id: 1, name: body.name, patterns: body.patterns, live_window_hours: 168, warmup_window_hours: 72, retention_days: 90 })
+      data = services[0]
+    } else if (path.endsWith('/services')) data = [...services]
+    else if (path.endsWith('/services/1/ips')) data = []
+    return { ok: true, json: async () => data }
+  })
+  vi.stubGlobal('fetch', fetchMock)
+  render(<App />)
+  fireEvent.click(await screen.findByRole('button', { name: 'Services' }))
+  fireEvent.click(screen.getByRole('button', { name: /Use YouTube template/ }))
+  expect((screen.getByLabelText('Service name') as HTMLInputElement).value).toBe('YouTube')
+  fireEvent.click(screen.getByRole('button', { name: /Create service/ }))
+  const count = await screen.findByText('7 domain patterns')
+  fireEvent.click(count.closest('button')!)
+  expect(screen.getByRole('button', { name: 'Save service settings' })).toBeTruthy()
+  expect(services[0].name).toBe('YouTube')
+  expect(services[0].patterns).toContain('*.googlevideo.com')
+})
