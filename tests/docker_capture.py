@@ -178,27 +178,36 @@ def main() -> None:
                 "routelearn:ci",
                 "agent",
             )
-        wait_for(lambda: request(opener, "/api/v1/agents") and True, 10)
-        time.sleep(3)
-        for port in (5353, 5354):
-            docker(
-                "run",
-                "--rm",
-                "--network",
-                "bridge",
-                "python:3.12-slim",
-                "python",
-                "-c",
-                CLIENT,
-                gateway,
-                str(port),
-            )
 
-        def observed():
+        def agents_online():
+            rows = request(opener, "/api/v1/agents")
+            return len(rows) == 2 and all(item["last_heartbeat"] for item in rows)
+
+        wait_for(agents_online, 30)
+        for _ in range(12):
+            for port in (5353, 5354):
+                docker(
+                    "run",
+                    "--rm",
+                    "--network",
+                    "bridge",
+                    "python:3.12-slim",
+                    "python",
+                    "-c",
+                    CLIENT,
+                    gateway,
+                    str(port),
+                )
             ips = request(opener, f"/api/v1/services/{service_id}/ips")
-            return len(ips) == 2 and all(row["clients"] and row["sources"] == ["dns-live"] for row in ips)
-
-        wait_for(observed)
+            if len(ips) == 2 and all(row["clients"] and row["sources"] == ["dns-live"] for row in ips):
+                break
+            time.sleep(2)
+        else:
+            print("Observed IPs:", json.dumps(ips))
+            print("Agent metrics:", json.dumps(request(opener, "/api/v1/agents")))
+            for name in names[1:3]:
+                print(f"{name} logs:\n{docker('logs', '--tail', '30', name)}")
+            raise AssertionError("Docker agents did not observe both resolver replies")
         print("Docker capture passed: host DNS and bridged DNS, both with client attribution")
     finally:
         for name in names:
