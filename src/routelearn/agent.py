@@ -95,6 +95,8 @@ class AgentRuntime:
         self.metrics: dict[str, int | str] = {
             "packets_seen": 0,
             "parsed": 0,
+            "client_responses": 0,
+            "last_client_ip": "",
             "matching": 0,
             "tcp_ignored": 0,
             "errors": 0,
@@ -146,6 +148,10 @@ class AgentRuntime:
                 self.metrics["tcp_ignored"] = int(self.metrics["tcp_ignored"]) + 1
                 return
             wire = wire[2 : size + 2]
+        if len(wire) < 3 or not wire[2] & 0x80:
+            return
+        self.metrics["client_responses"] = int(self.metrics["client_responses"]) + 1
+        self.metrics["last_client_ip"] = client
         observations = parse_dns_response(wire, self.patterns)
         self.metrics["parsed"] = int(self.metrics["parsed"]) + 1
         for service_id, domain, ip, ttl in observations:

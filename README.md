@@ -41,6 +41,8 @@ The agent uses host networking and `CAP_NET_RAW`, with a read-only root filesyst
 docker compose -f compose.agent.yml run --rm routelearn-agent doctor agent
 ```
 
+While `doctor agent` watches for 15 seconds, query that resolver from a client. It reports whether a local DNS response was seen and the client IP observed on the wire. Use `--observe-seconds 60` for a longer window.
+
 For a Docker bridge resolver, select the **host LAN egress interface** and verify the agent's matching counter rises after a client query. NAT and virtualization vary; confirm that the UI shows the true client IP before enabling routes. On Docker Desktop, passive LAN capture may not work because the agent is inside a VM; use a Linux DNS host.
 
 ## Optional AdGuard Home

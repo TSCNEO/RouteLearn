@@ -10,6 +10,7 @@ import typer
 import uvicorn
 from alembic import command
 from alembic.config import Config
+from scapy.all import sniff
 from sqlalchemy import inspect, select
 
 from .agent import AgentRuntime, interface_name, local_addresses
@@ -48,7 +49,10 @@ def agent() -> None:
 
 
 @app.command()
-def doctor(role: str = typer.Argument("server")) -> None:
+def doctor(
+    role: str = typer.Argument("server"),
+    observe_seconds: int = typer.Option(15, min=1, max=120),
+) -> None:
     if role == "agent":
         name = interface_name(settings.interface)
         if name not in psutil.net_if_addrs():
@@ -67,11 +71,32 @@ def doctor(role: str = typer.Argument("server")) -> None:
             typer.echo("Agent bootstrap is incomplete", err=True)
             raise typer.Exit(1)
         try:
-            AgentRuntime().refresh()
+            runtime = AgentRuntime()
+            runtime.refresh()
             typer.echo("Server and agent token: valid")
         except Exception as exc:
             typer.echo(f"Server or agent token failed: {type(exc).__name__}", err=True)
             raise typer.Exit(1) from exc
+        typer.echo(f"Observing local DNS replies for {observe_seconds} seconds; query this resolver now")
+        try:
+            sniff(
+                iface=runtime.interface,
+                filter=f"(udp or tcp) and src port {runtime.port}",
+                prn=runtime.handle_packet,
+                store=False,
+                timeout=observe_seconds,
+            )
+        except Exception as exc:
+            typer.echo(f"Capture failed: {type(exc).__name__}", err=True)
+            raise typer.Exit(1) from exc
+        count = runtime.metrics["client_responses"]
+        if not count:
+            typer.echo(
+                "No local DNS response to a client was observed; check interface and resolver IPs",
+                err=True,
+            )
+            raise typer.Exit(1)
+        typer.echo(f"Client responses: {count}; preserved client IP: {runtime.metrics['last_client_ip']}")
     else:
         settings.data_dir.mkdir(parents=True, exist_ok=True)
         writable_probe = settings.data_dir / ".writable"

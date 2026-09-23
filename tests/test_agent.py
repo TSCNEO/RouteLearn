@@ -49,6 +49,8 @@ def test_sensor_only_queues_local_resolver_reply(tmp_path: Path, monkeypatch) ->
     assert runtime.queue.size() == 0
     runtime.handle_packet(local)
     assert runtime.queue.size() == 1
+    assert runtime.metrics["client_responses"] == 1
+    assert runtime.metrics["last_client_ip"] == "192.0.2.10"
     event = runtime.queue.batch()[0][1]
     assert event["domain"] == "edge.googlevideo.com" and event["client_ip"] == "192.0.2.10"
     incomplete = IP(src="192.0.2.53", dst="192.0.2.10") / TCP(sport=53, dport=53000) / Raw(load=b"\x00\x20x")
