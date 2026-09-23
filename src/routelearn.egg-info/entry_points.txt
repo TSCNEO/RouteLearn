@@ -1,0 +1,2 @@
+[console_scripts]
+routelearn = routelearn.cli:app

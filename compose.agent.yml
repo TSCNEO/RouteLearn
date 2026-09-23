@@ -1,0 +1,20 @@
+services:
+  routelearn-agent:
+    build: .
+    image: routelearn:local
+    restart: unless-stopped
+    command: ["agent"]
+    network_mode: host
+    cap_add:
+      - NET_RAW
+    security_opt:
+      - no-new-privileges:true
+    read_only: true
+    environment:
+      ROUTELEARN_SERVER: ${ROUTELEARN_SERVER:?Set the server URL}
+      ROUTELEARN_AGENT_TOKEN: ${ROUTELEARN_AGENT_TOKEN:?Set the token generated in the UI}
+      ROUTELEARN_INTERFACE: ${ROUTELEARN_INTERFACE:-auto}
+    volumes:
+      - agent_data:/data
+volumes:
+  agent_data:
