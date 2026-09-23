@@ -1,0 +1,36 @@
+# Optional secondary Linux DNS host. Run from a separate checkout on that host.
+services:
+  adguard:
+    image: adguard/adguardhome:v0.107.66
+    restart: unless-stopped
+    ports:
+      - "${ADGUARD_BIND_IP:-0.0.0.0}:53:53/udp"
+      - "${ADGUARD_BIND_IP:-0.0.0.0}:53:53/tcp"
+      - "${ADGUARD_SETUP_PORT:-3000}:3000/tcp"
+      - "${ADGUARD_WEB_PORT:-8081}:80/tcp"
+    volumes:
+      - adguard_work:/opt/adguardhome/work
+      - adguard_conf:/opt/adguardhome/conf
+    security_opt:
+      - no-new-privileges:true
+  routelearn-agent:
+    build: .
+    image: routelearn:local
+    restart: unless-stopped
+    command: ["agent"]
+    network_mode: host
+    cap_add:
+      - NET_RAW
+    security_opt:
+      - no-new-privileges:true
+    read_only: true
+    environment:
+      ROUTELEARN_SERVER: ${ROUTELEARN_SERVER:?Set the central server URL}
+      ROUTELEARN_AGENT_TOKEN: ${ROUTELEARN_AGENT_TOKEN:?Set a token from the UI}
+      ROUTELEARN_INTERFACE: ${ROUTELEARN_INTERFACE:-auto}
+    volumes:
+      - agent_data:/data
+volumes:
+  adguard_work:
+  adguard_conf:
+  agent_data:

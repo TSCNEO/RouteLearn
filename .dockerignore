@@ -1,0 +1,8 @@
+.git
+.venv
+data
+frontend/node_modules
+frontend/dist
+src/routelearn/static
+__pycache__
+.pytest_cache

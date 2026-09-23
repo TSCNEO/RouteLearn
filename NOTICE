@@ -1,0 +1,4 @@
+RouteLearn's UniFi adapter follows the route discovery and API-shape strategy
+documented by StopLiga (https://github.com/jcastro/stopliga), authored by Jonatan
+Castro. StopLiga declares the MIT license in its pyproject.toml. The adapter
+here is independently written; no StopLiga source file is included verbatim.

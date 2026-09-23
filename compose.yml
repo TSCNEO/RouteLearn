@@ -1,0 +1,16 @@
+services:
+  routelearn:
+    build: .
+    image: routelearn:local
+    restart: unless-stopped
+    ports:
+      - "${ROUTELEARN_PORT:-8080}:8080"
+    volumes:
+      - routelearn_data:/data
+    dns:
+      - ${ROUTELEARN_BOOTSTRAP_DNS_1:-1.1.1.1}
+      - ${ROUTELEARN_BOOTSTRAP_DNS_2:-8.8.8.8}
+    security_opt:
+      - no-new-privileges:true
+volumes:
+  routelearn_data:

@@ -1,0 +1,15 @@
+.venv/
+__pycache__/
+.pytest_cache/
+.mypy_cache/
+.ruff_cache/
+frontend/node_modules/
+frontend/dist/
+frontend/*.tsbuildinfo
+src/*.egg-info/
+src/routelearn/static/
+data/
+*.db
+*.sqlite*
+.env
+.DS_Store
