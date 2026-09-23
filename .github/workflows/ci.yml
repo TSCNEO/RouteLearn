@@ -43,6 +43,7 @@ jobs:
       - run: docker build -t routelearn:ci .
       - run: docker run --rm routelearn:ci doctor server
       - run: python3 tests/docker_capture.py
+      - run: python3 tests/docker_adguard.py
       - run: |
           ROUTELEARN_SERVER=http://server.example.test:8080 ROUTELEARN_AGENT_TOKEN=dummy \
           docker compose -f compose.yml -f compose.adguard.yml config --quiet
