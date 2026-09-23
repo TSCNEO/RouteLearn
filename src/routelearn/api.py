@@ -5,6 +5,7 @@ from __future__ import annotations
 import hashlib
 import json
 import logging
+import re
 import threading
 import time
 from contextlib import asynccontextmanager
@@ -253,6 +254,16 @@ YOUTUBE_PATTERNS = [
 ]
 
 
+def validated_patterns(patterns: list[str]) -> list[str]:
+    values = [value.strip().rstrip(".").lower() for value in patterns]
+    domain_pattern = re.compile(
+        r"(?:\*\.)?[a-z0-9](?:[a-z0-9-]*[a-z0-9])?(?:\.[a-z0-9](?:[a-z0-9-]*[a-z0-9])?)*"
+    )
+    if not values or any(len(value) > 255 or not domain_pattern.fullmatch(value) for value in values):
+        raise HTTPException(422, "Invalid domain pattern")
+    return sorted(set(values))
+
+
 def _service_json(service: Service) -> dict[str, Any]:
     return {
         "id": service.id,
@@ -273,10 +284,9 @@ def services(db: DB, _: Admin) -> list[dict[str, Any]]:
 def create_service(payload: ServiceCreate, db: DB, _: Admin) -> dict[str, Any]:
     if db.scalar(select(Service).where(Service.name == payload.name)):
         raise HTTPException(409, "Service name exists")
-    values = [x.strip().rstrip(".").lower() for x in payload.patterns]
-    if any(not x or " " in x or ("*" in x and not x.startswith("*.")) for x in values):
-        raise HTTPException(422, "Invalid domain pattern")
-    item = Service(name=payload.name, patterns=[Pattern(value=x) for x in sorted(set(values))])
+    item = Service(
+        name=payload.name, patterns=[Pattern(value=x) for x in validated_patterns(payload.patterns)]
+    )
     db.add(item)
     audit(db, "service.created", name=payload.name)
     db.commit()
@@ -306,7 +316,13 @@ def update_service(service_id: int, payload: ServiceUpdate, db: DB, _: Admin) ->
         if value is not None:
             setattr(item, key, value)
     if payload.patterns is not None:
-        item.patterns = [Pattern(value=value.strip().rstrip(".").lower()) for value in payload.patterns]
+        values = set(validated_patterns(payload.patterns))
+        existing = {pattern.value: pattern for pattern in item.patterns}
+        for value, pattern in existing.items():
+            if value not in values:
+                item.patterns.remove(pattern)
+        db.flush()
+        item.patterns.extend(Pattern(value=value) for value in sorted(values - existing.keys()))
     audit(db, "service.updated", service_id=service_id)
     db.commit()
     return _service_json(item)

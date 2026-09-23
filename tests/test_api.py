@@ -38,6 +38,18 @@ def test_setup_agent_auth_and_idempotent_ingest() -> None:
         )
         assert service.status_code == 200
         service_id = service.json()["id"]
+        changed = client.patch(
+            f"/api/v1/services/{service_id}",
+            json={"patterns": ["*.googlevideo.com", "youtube.com"], "live_window_hours": 48},
+            headers=headers,
+        )
+        assert changed.status_code == 200 and changed.json()["live_window_hours"] == 48
+        assert (
+            client.patch(
+                f"/api/v1/services/{service_id}", json={"patterns": ["*.example.*"]}, headers=headers
+            ).status_code
+            == 422
+        )
         agent = client.post("/api/v1/agents", json={"name": "primary-dns"}, headers=headers)
         assert agent.status_code == 200
         assert client.post("/api/v1/agents", json={"name": "primary-dns"}, headers=headers).status_code == 409
@@ -67,5 +79,6 @@ def test_setup_agent_auth_and_idempotent_ingest() -> None:
             assert len(db.scalars(select(IngestEvent)).all()) == 1
             assert db.scalar(select(LearnedIP)).hits == 1
             assert db.scalar(select(IPClient)).client_ip == "192.0.2.10"
+        assert client.get(f"/api/v1/services/{service_id}/ips").json()[0]["agents"] == ["primary-dns"]
         assert client.post(f"/api/v1/agents/{agent.json()['id']}/revoke", headers=headers).status_code == 200
         assert client.get("/api/v1/agents/config", headers=auth).status_code == 401

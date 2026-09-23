@@ -12,7 +12,7 @@ from pydantic import BaseModel, Field
 from sqlalchemy import select
 from sqlalchemy.orm import Session
 
-from .db import IPClient, IPDomain, IPSource, LearnedIP, Pattern, Service, utcnow
+from .db import Agent, IPClient, IPDomain, IPSource, LearnedIP, Pattern, Service, utcnow
 
 
 def normalize_domain(value: str) -> str:
@@ -186,6 +186,7 @@ def prune_history(db: Session) -> int:
 
 
 def serialize_ip(db: Session, row: LearnedIP, service: Service) -> dict[str, Any]:
+    sources = db.scalars(select(IPSource).where(IPSource.learned_ip_id == row.id)).all()
     return {
         "id": row.id,
         "ip": row.ip,
@@ -202,5 +203,8 @@ def serialize_ip(db: Session, row: LearnedIP, service: Service) -> dict[str, Any
         "clients": [
             x.client_ip for x in db.scalars(select(IPClient).where(IPClient.learned_ip_id == row.id))
         ],
-        "sources": [x.source for x in db.scalars(select(IPSource).where(IPSource.learned_ip_id == row.id))],
+        "sources": sorted({x.source for x in sources}),
+        "agents": sorted(
+            {agent.name for x in sources if x.agent_id and (agent := db.get(Agent, x.agent_id))}
+        ),
     }
