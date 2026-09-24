@@ -32,7 +32,16 @@ def test_setup_agent_auth_and_idempotent_ingest() -> None:
             ).status_code
             == 200
         )
-        headers = {"X-CSRF-Token": client.cookies["routelearn_csrf"]}
+        csrf = client.cookies["routelearn_csrf"]
+        client.cookies.delete("routelearn_csrf")
+        assert (
+            client.post(
+                "/api/v1/services", json={"name": "Blocked", "patterns": ["blocked.example"]}
+            ).status_code
+            == 403
+        )
+        client.cookies.set("routelearn_csrf", csrf)
+        headers = {"X-CSRF-Token": csrf}
         service = client.post(
             "/api/v1/services", json={"name": "Video", "patterns": ["*.googlevideo.com"]}, headers=headers
         )

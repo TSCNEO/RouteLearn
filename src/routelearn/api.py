@@ -6,6 +6,7 @@ import hashlib
 import json
 import logging
 import re
+import secrets
 import threading
 import time
 from contextlib import asynccontextmanager
@@ -129,7 +130,9 @@ def current_user(request: Request, db: DB) -> User:
         raise HTTPException(401, "Session expired")
     if request.method not in ("GET", "HEAD", "OPTIONS"):
         _same_origin(request)
-        if request.headers.get("x-csrf-token") != request.cookies.get("routelearn_csrf"):
+        csrf_cookie = request.cookies.get("routelearn_csrf")
+        csrf_header = request.headers.get("x-csrf-token")
+        if not csrf_cookie or not csrf_header or not secrets.compare_digest(csrf_cookie, csrf_header):
             raise HTTPException(403, "CSRF token missing")
     user = db.get(User, login.user_id)
     if user is None:
@@ -173,8 +176,6 @@ def setup_admin(payload: AdminSetup, request: Request, db: DB) -> dict[str, str]
     _same_origin(request)
     if db.scalar(select(func.count(User.id))) != 0:
         raise HTTPException(409, "Admin already exists")
-    import secrets
-
     if not secrets.compare_digest(payload.setup_code, setup_code()):
         raise HTTPException(403, "Invalid setup code")
     db.add(User(username=payload.username, password_hash=hasher.hash(payload.password)))
