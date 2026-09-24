@@ -13,7 +13,14 @@ type Page = 'overview' | 'services' | 'agents' | 'routing' | 'warmup'
 function csrf() { return document.cookie.split('; ').find(x => x.startsWith('routelearn_csrf='))?.split('=')[1] || '' }
 async function api<T>(path: string, method = 'GET', body?: unknown): Promise<T> {
   const response = await fetch('/api/v1' + path, { method, credentials: 'same-origin', headers: { 'Content-Type': 'application/json', 'X-CSRF-Token': csrf() }, body: body === undefined ? undefined : JSON.stringify(body) })
-  if (!response.ok) { const error = await response.json().catch(() => ({})); throw new Error(error.detail || `Request failed (${response.status})`) }
+  if (!response.ok) {
+    const error = await response.json().catch(() => ({}))
+    const detail = error.detail
+    const message = typeof detail === 'string' ? detail
+      : Array.isArray(detail) ? detail.map(x => x.msg).join('; ')
+      : `Request failed (${response.status})`
+    throw new Error(message)
+  }
   return response.json() as Promise<T>
 }
 const time = (value: string | null) => value ? new Date(value + (value.endsWith('Z') ? '' : 'Z')).toLocaleString() : 'Never'
@@ -84,8 +91,101 @@ function Routing({ action, version }: { action: (fn: () => Promise<unknown>, suc
   return <><Heading kicker="CONTROL PLANE" title="Routers & routes" detail="Preview every change before syncing. Policies stay in learning mode until you activate them."/><div className="split-grid wide-left"><div><div className="panel"><div className="panel-head"><h3>Router connections</h3><span className="muted">{routers.length} configured</span></div>{routers.length ? routers.map(x => <button className={'list-row clickable ' + (selectedRouter === x.id ? 'selected' : '')} key={x.id} onClick={() => { setSelectedRouter(x.id); setDiscovery(null) }}><span className="service-avatar"><Router size={18}/></span><span><strong>{x.name}</strong><small>{x.host} · Site {x.site}</small></span><ArrowRight size={17}/></button>) : <Empty title="No router connected" detail="Learning works without a router. Add UniFi when you are ready to route."/>}{selected && <div className="panel-tail"><button className="button outline" onClick={() => action(async () => setDiscovery(await api<Discovery>(`/routers/${selected.id}/discover`)), 'UniFi discovery complete')}>Test & discover <RefreshCw size={15}/></button>{discovery && <div className="discovery"><div><b>{discovery.sites.length}</b> sites</div><div><b>{discovery.vpn_clients.length}</b> VPN clients</div><div><b>{discovery.clients.length}</b> clients</div></div>}</div>}</div><div className="panel"><div className="panel-head"><h3>Managed policies</h3><span className="muted">Exact destinations only</span></div>{policies.length ? policies.map(p => <div className="policy-row" key={p.id}><div className="policy-main"><div><strong>{p.name}</strong><span className={'pill ' + (p.state === 'active' ? 'active' : '')}>{p.state.toUpperCase()}</span></div><small>Exit {p.vpn_name} · Last sync {time(p.last_synced_at)}</small></div><div className="row-actions"><select value={p.state} onChange={e => action(() => api(`/routes/${p.id}`, 'PATCH', { state: e.target.value }), 'Policy state updated')}><option value="learning">Learning</option><option value="active">Active</option><option value="paused">Paused</option></select><button onClick={() => action(async () => setPreview({ ...preview, [p.id]: await api(`/routes/${p.id}/preview`) }), 'Diff loaded')}>Preview</button><button onClick={() => action(() => api(`/routes/${p.id}/sync`, 'POST'), 'Sync finished')}>Sync now</button></div>{preview[p.id] && <div className="policy-diff"><span>+{preview[p.id].added.length} / −{preview[p.id].removed.length} destinations</span>{preview[p.id].ipv6_learned > preview[p.id].ipv6_routed && <span className="warning"><ShieldAlert size={15}/> {preview[p.id].ipv6_learned - preview[p.id].ipv6_routed} learned IPv6 addresses are not currently routed.</span>}</div>}</div>) : <Empty title="No policies" detail="Connect a router and choose a service and existing VPN client."/>}</div></div><div><div className="panel form-panel"><div className="panel-head"><h3>Add UniFi router</h3><Plus size={18}/></div><label>Connection name<input value={routerName} onChange={e => setRouterName(e.target.value)} placeholder="Home gateway"/></label><label>Gateway hostname or IP<input value={host} onChange={e => setHost(e.target.value)} placeholder="gateway.example.test"/></label><label>Site<input value={site} onChange={e => setSite(e.target.value)}/></label><label>Local API key<input type="password" value={key} onChange={e => setKey(e.target.value)}/></label><label className="checkline"><input type="checkbox" checked={verify} onChange={e => setVerify(e.target.checked)}/> Verify TLS certificate</label><button className="button primary" disabled={!routerName || !host || !key} onClick={() => action(async () => { await api('/routers', 'POST', { name: routerName, host, site, api_key: key, verify_tls: verify }); setKey('') }, 'Router saved. Test its connection.')}>Save router <ArrowRight size={16}/></button></div><div className="panel form-panel"><div className="panel-head"><h3>New route policy</h3><Plus size={18}/></div><label>Service<select value={selectedService} onChange={e => setSelectedService(Number(e.target.value))}><option value={0}>Select a service</option>{services.map(x => <option key={x.id} value={x.id}>{x.name}</option>)}</select></label><label>Router<select value={selectedRouter} onChange={e => setSelectedRouter(Number(e.target.value))}><option value={0}>Select a router</option>{routers.map(x => <option key={x.id} value={x.id}>{x.name}</option>)}</select></label><label>VPN client<select value={vpn} onChange={e => setVpn(e.target.value)}><option value="">Discover VPN clients first</option>{discovery?.vpn_clients.map(x => <option key={x._id || x.id} value={x._id || x.id}>{x.name}</option>)}</select></label><div className="check-group"><span>Source clients · none selected means all clients</span>{discovery?.clients.filter(x => x.mac).map(x => <label className="checkline" key={x.mac}><input type="checkbox" checked={sourceClients.includes(x.mac)} onChange={e => setSourceClients(e.target.checked ? [...sourceClients, x.mac] : sourceClients.filter(mac => mac !== x.mac))}/>{x.name || x.hostname || x.mac}</label>)}</div><label>Mode<select value={state} onChange={e => setState(e.target.value)}><option value="learning">Learning — no route changes</option><option value="active">Active — sync routes</option></select></label><button className="button primary" disabled={!selectedRouter || !selectedService || !vpn} onClick={() => action(() => api('/routes', 'POST', { router_id: selectedRouter, service_id: selectedService, vpn_network_id: vpn, vpn_name: discovery?.vpn_clients.find(x => (x._id || x.id) === vpn)?.name || vpn, source_clients: sourceClients, state }), 'Policy created')}>Create policy <ArrowRight size={16}/></button></div></div></div></>
 }
 
+type WarmupRunSummary = {
+  id: number
+  service_id: number
+  status: string
+  result: {
+    videos?: number
+    requested_videos?: number
+    hostnames?: number
+    new_ips?: number
+    selected_urls?: string[]
+    errors?: string[]
+  }
+}
+
 function Warmup({ action, version }: { action: (fn: () => Promise<unknown>, success?: string) => void; version: number }) {
-  const [services, setServices] = useState<Service[]>([]); const [runs, setRuns] = useState<{id: number; service_id: number; status: string; result: Record<string, unknown>}[]>([]); const [serviceId, setServiceId] = useState(0); const [urls, setUrls] = useState(''); const [cloudflare, setCloudflare] = useState(true); const [google, setGoogle] = useState(true)
-  useEffect(() => { api<Service[]>('/services').then(setServices); api<typeof runs>('/warmup/runs').then(setRuns) }, [version])
-  return <><Heading kicker="OPTIONAL DISCOVERY" title="Warm-up" detail="Inspect YouTube metadata without downloading video. Resolve matching delivery hosts through selected public DNS."/><div className="split-grid wide-left"><div className="panel"><div className="panel-head"><h3>Recent runs</h3><span className="muted">Metadata only</span></div>{runs.length ? runs.map(run => <div className="list-row" key={run.id}><span className="service-avatar"><Zap size={18}/></span><span><strong>Run #{run.id} <span className={'pill ' + (run.status === 'complete' ? 'active' : '')}>{run.status}</span></strong><small>{String(run.result?.videos ?? 0)} videos · {String(run.result?.hostnames ?? 0)} hostnames · {String(run.result?.new_ips ?? 0)} observations</small></span></div>) : <Empty title="No warm-up runs" detail="This is optional. Live DNS observations remain the primary source of knowledge."/>}</div><div className="panel form-panel"><div className="panel-head"><h3>Start YouTube warm-up</h3><Zap size={18}/></div><p>Use up to 20 HTTPS YouTube URLs. No cookies, login, or media download.</p><label>Service<select value={serviceId} onChange={e => setServiceId(Number(e.target.value))}><option value={0}>Select a service</option>{services.map(x => <option key={x.id} value={x.id}>{x.name}</option>)}</select></label><label>Video URLs <small>One per line</small><textarea rows={6} value={urls} onChange={e => setUrls(e.target.value)} placeholder="https://www.youtube.com/watch?v=…"/></label><div className="check-group"><span>Explicit DNS resolvers</span><label className="checkline"><input type="checkbox" checked={cloudflare} onChange={e => setCloudflare(e.target.checked)}/> Cloudflare</label><label className="checkline"><input type="checkbox" checked={google} onChange={e => setGoogle(e.target.checked)}/> Google</label></div><button className="button primary" disabled={!serviceId || !urls.trim() || (!cloudflare && !google)} onClick={() => action(() => api(`/services/${serviceId}/warmup`, 'POST', { urls: urls.split('\n').map(x => x.trim()).filter(Boolean).slice(0, 20), resolvers: [cloudflare && 'cloudflare', google && 'google'].filter(Boolean) }), 'Warm-up started')}>Start warm-up <ArrowRight size={16}/></button><div className="fine-print"><ShieldAlert size={16}/> yt-dlp metadata requests use the server container DNS. Matching hostnames are resolved explicitly with the selected providers.</div></div></div></>
+  const [services, setServices] = useState<Service[]>([])
+  const [runs, setRuns] = useState<WarmupRunSummary[]>([])
+  const [serviceChoice, setServiceChoice] = useState('youtube')
+  const [videoChoice, setVideoChoice] = useState('random-10')
+  const [urls, setUrls] = useState('')
+  const [cloudflare, setCloudflare] = useState(true)
+  const [google, setGoogle] = useState(true)
+  const youtubeService = services.find(x => x.name.toLowerCase() === 'youtube')
+  const manual = videoChoice === 'manual'
+  const canStart = (manual ? urls.trim().length > 0 : true) && (cloudflare || google)
+
+  useEffect(() => {
+    api<Service[]>('/services').then(setServices)
+    api<WarmupRunSummary[]>('/warmup/runs').then(setRuns)
+  }, [version])
+
+  const start = () => action(async () => {
+    let serviceId: number
+    if (serviceChoice === 'youtube') {
+      if (youtubeService) {
+        serviceId = youtubeService.id
+      } else {
+        const templates = await api<Record<string, string[]>>('/services/templates')
+        const created = await api<Service>('/services', 'POST', { name: 'YouTube', patterns: templates.YouTube })
+        serviceId = created.id
+      }
+    } else {
+      serviceId = Number(serviceChoice)
+    }
+    await api(`/services/${serviceId}/warmup`, 'POST', {
+      urls: manual ? urls.split('\n').map(x => x.trim()).filter(Boolean) : [],
+      random_count: manual ? 0 : Number(videoChoice.split('-')[1]),
+      resolvers: [cloudflare && 'cloudflare', google && 'google'].filter(Boolean),
+    })
+  }, 'Warm-up started')
+
+  return <>
+    <Heading kicker="OPTIONAL DISCOVERY" title="Warm-up" detail="Inspect YouTube metadata without downloading video. Resolve matching delivery hosts through selected public DNS."/>
+    <div className="split-grid wide-left">
+      <div className="panel">
+        <div className="panel-head"><h3>Recent runs</h3><span className="muted">Metadata only</span></div>
+        {runs.length ? runs.map(run => <div className="warmup-run" key={run.id}>
+          <div className="list-row">
+            <span className="service-avatar"><Zap size={18}/></span>
+            <span>
+              <strong>Run #{run.id} <span className={'pill ' + (run.status === 'complete' ? 'active' : run.status === 'error' ? 'hold' : '')}>{run.status}</span></strong>
+              <small>{run.result.videos ?? 0}/{run.result.requested_videos ?? 0} videos · {run.result.hostnames ?? 0} hostnames · {run.result.new_ips ?? 0} new IPs</small>
+            </span>
+          </div>
+          {!!run.result.errors?.length && <div className="warmup-errors" role="status">{run.result.errors.map((error, index) => <div key={index}>{error}</div>)}</div>}
+          {!!run.result.selected_urls?.length && <details className="warmup-videos"><summary>Videos selected</summary><ol>{run.result.selected_urls.map(url => <li key={url}><a href={url} target="_blank" rel="noopener noreferrer">{url}</a></li>)}</ol></details>}
+        </div>) : <Empty title="No warm-up runs" detail="This is optional. Live DNS observations remain the primary source of knowledge."/>}
+      </div>
+      <div className="panel form-panel">
+        <div className="panel-head"><h3>Start YouTube warm-up</h3><Zap size={18}/></div>
+        <p>Choose a varied YouTube sample or paste your own links. Only metadata is inspected.</p>
+        <label>Service
+          <select value={serviceChoice} onChange={e => setServiceChoice(e.target.value)}>
+            <option value="youtube">YouTube</option>
+            {services.filter(x => x.id !== youtubeService?.id).map(x => <option key={x.id} value={x.id}>{x.name}</option>)}
+          </select>
+        </label>
+        {serviceChoice === 'youtube' && !youtubeService && <p className="field-hint">The YouTube service will be created when you start.</p>}
+        <label>Videos
+          <select value={videoChoice} onChange={e => setVideoChoice(e.target.value)}>
+            <option value="random-10">10 varied YouTube videos</option>
+            <option value="random-20">20 varied YouTube videos</option>
+            <option value="manual">Paste video URLs</option>
+          </select>
+        </label>
+        {manual && <label>Video URLs <small>One per line, up to 20</small>
+          <textarea rows={6} value={urls} onChange={e => setUrls(e.target.value)} placeholder="https://youtu.be/roU-LvCIZ6w"/>
+        </label>}
+        <div className="check-group"><span>Explicit DNS resolvers</span>
+          <label className="checkline"><input type="checkbox" checked={cloudflare} onChange={e => setCloudflare(e.target.checked)}/> Cloudflare</label>
+          <label className="checkline"><input type="checkbox" checked={google} onChange={e => setGoogle(e.target.checked)}/> Google</label>
+        </div>
+        <button className="button primary" disabled={!canStart} onClick={start}>Start warm-up <ArrowRight size={16}/></button>
+        <div className="fine-print"><ShieldAlert size={16}/> YouTube search and metadata use the server container DNS. Matching delivery hosts are resolved through the selected providers.</div>
+      </div>
+    </div>
+  </>
 }

@@ -1,9 +1,12 @@
 """Warm-up discovers only configured hosts through explicit public resolvers."""
 
+import pytest
+from pydantic import ValidationError
 from sqlalchemy import create_engine, select
 from sqlalchemy.orm import Session
 
 import routelearn.warmup as module
+from routelearn.api import WarmupStart
 from routelearn.db import Base, IPSource, Pattern, Service, WarmupRun
 
 
@@ -73,3 +76,38 @@ def test_warmup_keeps_resolver_provenance_and_does_not_download(monkeypatch) -> 
             "warmup-cloudflare",
             "warmup-google",
         }
+
+
+def test_pasted_short_youtube_link_is_accepted_and_tracking_removed() -> None:
+    payload = WarmupStart(urls=["https://youtu.be/roU-LvCIZ6w?si=g6IjyL9tr_nQ6LMX"])
+    assert payload.urls == ["https://www.youtube.com/watch?v=roU-LvCIZ6w"]
+    with pytest.raises(ValidationError):
+        WarmupStart(urls=["https://youtu.be.evil.example/roU-LvCIZ6w"])
+    with pytest.raises(ValidationError):
+        WarmupStart(urls=[])
+    assert WarmupStart(random_count=10).random_count == 10
+    assert WarmupStart(random_count=20).random_count == 20
+
+
+def test_random_sample_uses_unique_ids_from_youtube_search(monkeypatch) -> None:
+    class Downloader:
+        def __init__(self, options):
+            assert options["extract_flat"] is True
+            assert options["skip_download"] is True
+
+        def __enter__(self):
+            return self
+
+        def __exit__(self, *_):
+            return None
+
+        def extract_info(self, query, *, download):
+            assert query.startswith("ytsearch8:") and download is False
+            topic = query.split(":", 1)[1]
+            seed = module.SEARCH_TOPICS.index(topic)
+            return {"entries": [{"id": f"video{seed:02d}{i:04d}"} for i in range(8)]}
+
+    monkeypatch.setattr(module.yt_dlp, "YoutubeDL", Downloader)
+    urls = module.random_youtube_urls(20)
+    assert len(urls) == len(set(urls)) == 20
+    assert all(url.startswith("https://www.youtube.com/watch?v=video") for url in urls)
