@@ -98,6 +98,7 @@ class AgentRuntime:
             "client_responses": 0,
             "last_client_ip": "",
             "matching": 0,
+            "events_sent": 0,
             "tcp_ignored": 0,
             "errors": 0,
             "interface": self.interface,
@@ -183,6 +184,20 @@ class AgentRuntime:
                 logger.exception("capture_failed")
                 time.sleep(5)
 
+    def flush_once(self) -> bool:
+        batch = self.queue.batch()
+        if not batch:
+            return True
+        try:
+            response = self.http.post("/api/v1/ingest/dns", json={"events": [item[1] for item in batch]})
+            response.raise_for_status()
+            self.queue.remove([item[0] for item in batch])
+        except Exception:
+            self.metrics["errors"] = int(self.metrics["errors"]) + 1
+            return False
+        self.metrics["events_sent"] = int(self.metrics["events_sent"]) + len(batch)
+        return True
+
     def run(self) -> None:
         if settings.server_url.startswith("http://"):
             logger.warning("Agent token is sent over HTTP. Use HTTPS outside a trusted LAN.")
@@ -200,16 +215,7 @@ class AgentRuntime:
                 except Exception:
                     self.metrics["errors"] = int(self.metrics["errors"]) + 1
                 last_refresh = now
-            batch = self.queue.batch()
-            if batch:
-                try:
-                    response = self.http.post(
-                        "/api/v1/ingest/dns", json={"events": [item[1] for item in batch]}
-                    )
-                    response.raise_for_status()
-                    self.queue.remove([item[0] for item in batch])
-                except Exception:
-                    self.metrics["errors"] = int(self.metrics["errors"]) + 1
+            self.flush_once()
             if now - last_heartbeat >= 30:
                 try:
                     response = self.http.post(

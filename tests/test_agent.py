@@ -2,6 +2,7 @@ from pathlib import Path
 
 import dns.message
 import dns.rrset
+import httpx
 from scapy.layers.inet import IP, TCP, UDP
 from scapy.packet import Raw
 
@@ -56,3 +57,37 @@ def test_sensor_only_queues_local_resolver_reply(tmp_path: Path, monkeypatch) ->
     incomplete = IP(src="192.0.2.53", dst="192.0.2.10") / TCP(sport=53, dport=53000) / Raw(load=b"\x00\x20x")
     runtime.handle_packet(incomplete)
     assert runtime.metrics["tcp_ignored"] == 1
+
+
+def test_agent_retries_persisted_batch_after_server_outage(tmp_path: Path, monkeypatch) -> None:
+    monkeypatch.setattr(
+        agent_module,
+        "settings",
+        Settings(data_dir=tmp_path, server_url="http://localhost:8080", agent_token="test-token"),
+    )
+    runtime = agent_module.AgentRuntime()
+    runtime.queue.put({"event_id": "durable-event", "service_id": 1})
+    calls = 0
+
+    def reply(request: httpx.Request) -> httpx.Response:
+        nonlocal calls
+        calls += 1
+        if calls == 1:
+            raise httpx.ConnectError("server offline")
+        assert request.url.path == "/api/v1/ingest/dns"
+        assert b"durable-event" in request.content
+        return httpx.Response(200, json={"accepted": 1})
+
+    runtime.http.close()
+    runtime.http = httpx.Client(base_url="http://localhost:8080", transport=httpx.MockTransport(reply))
+    assert runtime.flush_once() is False
+    assert runtime.queue.size() == 1
+
+    restarted = agent_module.AgentRuntime()
+    restarted.http.close()
+    restarted.http = runtime.http
+    assert restarted.flush_once() is True
+    assert restarted.queue.size() == 0
+    assert restarted.metrics["events_sent"] == 1
+    assert calls == 2
+    restarted.http.close()
