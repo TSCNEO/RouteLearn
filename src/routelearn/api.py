@@ -12,13 +12,13 @@ import time
 from contextlib import asynccontextmanager
 from datetime import timedelta
 from pathlib import Path
-from typing import Annotated, Any
+from typing import Annotated, Any, Literal
 
 from argon2.exceptions import VerifyMismatchError
 from fastapi import BackgroundTasks, Depends, FastAPI, HTTPException, Request, Response
 from fastapi.responses import FileResponse, StreamingResponse
 from fastapi.staticfiles import StaticFiles
-from pydantic import BaseModel, Field
+from pydantic import BaseModel, Field, field_validator, model_validator
 from sqlalchemy import func, select
 from sqlalchemy.orm import Session as DBSession
 
@@ -44,7 +44,7 @@ from .db import (
 from .learning import Observation, active_ips, matches, pattern_map, record_observation, serialize_ip
 from .routing import RouterError, UniFiBackend, policy_preview, reconcile
 from .security import clear_setup_code, encrypt, hasher, new_token, setup_code, token_hash
-from .warmup import RESOLVERS, warmup
+from .warmup import RESOLVERS, normalize_youtube_url, warmup
 
 logger = logging.getLogger(__name__)
 _sync_lock = threading.Lock()
@@ -659,8 +659,20 @@ def sync_runs(db: DB, _: Admin) -> list[dict[str, Any]]:
 
 
 class WarmupStart(BaseModel):
-    urls: list[str] = Field(min_length=1, max_length=20)
-    resolvers: list[str] = ["cloudflare", "google"]
+    urls: list[str] = Field(default_factory=list, max_length=20)
+    random_count: Literal[0, 10, 20] = 0
+    resolvers: list[str] = Field(default_factory=lambda: ["cloudflare", "google"])
+
+    @field_validator("urls")
+    @classmethod
+    def valid_urls(cls, urls: list[str]) -> list[str]:
+        return list(dict.fromkeys(normalize_youtube_url(url) for url in urls))
+
+    @model_validator(mode="after")
+    def valid_source(self) -> WarmupStart:
+        if bool(self.urls) == bool(self.random_count):
+            raise ValueError("Provide video URLs or choose 10 or 20 random videos")
+        return self
 
 
 @app.post("/api/v1/services/{service_id}/warmup")
@@ -673,9 +685,9 @@ def start_warmup(
         raise HTTPException(422, "Select Cloudflare and/or Google")
     run = WarmupRun(service_id=service_id, status="running", result={})
     db.add(run)
-    audit(db, "warmup.started", service_id=service_id, videos=len(payload.urls))
+    audit(db, "warmup.started", service_id=service_id, videos=len(payload.urls) or payload.random_count)
     db.commit()
-    background.add_task(warmup, service_id, run.id, payload.urls, payload.resolvers)
+    background.add_task(warmup, service_id, run.id, payload.urls, payload.resolvers, payload.random_count)
     return {"run_id": run.id}
 
 
