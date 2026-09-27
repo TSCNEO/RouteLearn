@@ -76,7 +76,7 @@ Managed routes are named `RouteLearn · SERVICE`. Empty active sets do not creat
 - DNS TTL is retained as evidence but does not control route expiry. Defaults: live 7 days, warm-up 72 hours, history 90 days.
 - IPv6 observations are retained and shown separately. Confirm that the chosen UniFi VPN client actually routes IPv6; RouteLearn does not disable IPv6 to hide a mismatch.
 - If the server or agent stops, existing DNS and Internet continue working.
-- The warm-up uses yt-dlp metadata only, without cookies or media download. It accepts HTTPS YouTube URLs and resolves matching hosts explicitly through the chosen Cloudflare and/or Google resolvers. Direct outbound DNS must be permitted.
+- The warm-up uses yt-dlp metadata only, without cookies or media download. Choose 10 or 20 varied videos found through YouTube search, or paste up to 20 HTTPS YouTube links (including `youtu.be` links). Selecting YouTube creates its editable service template on the first run. Matching hosts are resolved explicitly through the chosen Cloudflare and/or Google resolvers. YouTube search and direct outbound DNS must be permitted; run errors and selected URLs appear in the UI.
 
 ## Development
 

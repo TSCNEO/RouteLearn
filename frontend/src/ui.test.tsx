@@ -1,9 +1,9 @@
 // @vitest-environment jsdom
-import { fireEvent, render, screen, waitFor } from '@testing-library/react'
+import { cleanup, fireEvent, render, screen, waitFor } from '@testing-library/react'
 import { afterEach, expect, test, vi } from 'vitest'
 import { App, Auth } from './ui'
 
-afterEach(() => vi.unstubAllGlobals())
+afterEach(() => { cleanup(); vi.unstubAllGlobals() })
 
 test('first-run admin setup sends code and signs in', async () => {
   const fetchMock = vi.fn().mockResolvedValue({ ok: true, json: async () => ({ status: 'created' }) })
@@ -68,4 +68,30 @@ test('learning mode creates an editable service without a router', async () => {
   expect(screen.getByRole('button', { name: 'Save service settings' })).toBeTruthy()
   expect(services[0].name).toBe('YouTube')
   expect(services[0].patterns).toContain('*.googlevideo.com')
+})
+
+test('YouTube warm-up creates its service and requests 20 varied videos', async () => {
+  vi.stubGlobal('EventSource', class { close() {} })
+  const fetchMock = vi.fn(async (input: string, init?: RequestInit) => {
+    const path = String(input)
+    const data = path.endsWith('/auth/status') ? { needs_setup: false }
+      : path.endsWith('/auth/me') ? { username: 'admin' }
+      : path.endsWith('/services/templates') ? { YouTube: ['*.googlevideo.com'] }
+      : path.endsWith('/services') && init?.method === 'POST' ? { id: 1, name: 'YouTube', patterns: ['*.googlevideo.com'] }
+      : path.endsWith('/services') ? []
+      : path.endsWith('/warmup/runs') ? []
+      : path.endsWith('/warmup') ? { run_id: 1 }
+      : {}
+    return { ok: true, json: async () => data }
+  })
+  vi.stubGlobal('fetch', fetchMock)
+  render(<App />)
+  fireEvent.click(await screen.findByRole('button', { name: 'Warm-up' }))
+  expect((screen.getByLabelText('Service') as HTMLSelectElement).value).toBe('youtube')
+  fireEvent.change(screen.getByLabelText('Videos'), { target: { value: 'random-20' } })
+  fireEvent.click(screen.getByRole('button', { name: /Start warm-up/ }))
+  await waitFor(() => expect(fetchMock.mock.calls.some(([url]) => String(url).endsWith('/warmup'))).toBe(true))
+  const warmupCall = fetchMock.mock.calls.find(([url]) => String(url).endsWith('/warmup'))!
+  expect(JSON.parse(String(warmupCall[1]?.body))).toEqual({ urls: [], random_count: 20, resolvers: ['cloudflare', 'google'] })
+  expect(fetchMock.mock.calls.some(([url, init]) => String(url).endsWith('/services') && init?.method === 'POST')).toBe(true)
 })
