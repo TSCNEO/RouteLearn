@@ -89,6 +89,11 @@ def test_setup_agent_auth_and_idempotent_ingest() -> None:
             assert db.scalar(select(LearnedIP)).hits == 1
             assert db.scalar(select(IPClient)).client_ip == "192.0.2.10"
         assert client.get(f"/api/v1/services/{service_id}/ips").json()[0]["agents"] == ["primary-dns"]
+        del_ips = client.delete(f"/api/v1/services/{service_id}/ips", headers=headers)
+        assert del_ips.status_code == 200
+        assert del_ips.json()["status"] == "cleared"
+        assert del_ips.json()["removed"] == 1
+        assert client.get(f"/api/v1/services/{service_id}/ips").json() == []
         assert client.post(f"/api/v1/agents/{agent.json()['id']}/revoke", headers=headers).status_code == 200
         assert client.get("/api/v1/agents/config", headers=auth).status_code == 401
 

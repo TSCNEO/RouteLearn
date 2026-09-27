@@ -41,7 +41,15 @@ from .db import (
 from .db import (
     Session as LoginSession,
 )
-from .learning import Observation, active_ips, matches, pattern_map, record_observation, serialize_ip
+from .learning import (
+    Observation,
+    active_ips,
+    clear_service_ips,
+    matches,
+    pattern_map,
+    record_observation,
+    serialize_ip,
+)
 from .routing import RouterError, UniFiBackend, policy_preview, reconcile
 from .security import clear_setup_code, encrypt, hasher, new_token, setup_code, token_hash
 from .warmup import RESOLVERS, normalize_youtube_url, warmup
@@ -338,6 +346,16 @@ def service_ips(service_id: int, db: DB, _: Admin) -> list[dict[str, Any]]:
         serialize_ip(db, ip, service)
         for ip in db.scalars(select(LearnedIP).where(LearnedIP.service_id == service_id))
     ]
+
+
+@app.delete("/api/v1/services/{service_id}/ips")
+def reset_service_ips(service_id: int, db: DB, _: Admin) -> dict[str, Any]:
+    service = db.get(Service, service_id)
+    if service is None:
+        raise HTTPException(404, "Service not found")
+    removed = clear_service_ips(db, service_id)
+    audit(db, "service.ips_reset", service_id=service_id, count=removed)
+    return {"status": "cleared", "removed": removed}
 
 
 class IPUpdate(BaseModel):

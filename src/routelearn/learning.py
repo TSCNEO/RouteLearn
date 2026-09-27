@@ -185,6 +185,19 @@ def prune_history(db: Session) -> int:
     return removed
 
 
+def clear_service_ips(db: Session, service_id: int) -> int:
+    removed = 0
+    rows = db.scalars(select(LearnedIP).where(LearnedIP.service_id == service_id)).all()
+    for row in rows:
+        for model in (IPDomain, IPClient, IPSource):
+            for relation in db.scalars(select(model).where(model.learned_ip_id == row.id)):
+                db.delete(relation)
+        db.delete(row)
+        removed += 1
+    db.commit()
+    return removed
+
+
 def serialize_ip(db: Session, row: LearnedIP, service: Service) -> dict[str, Any]:
     sources = db.scalars(select(IPSource).where(IPSource.learned_ip_id == row.id)).all()
     return {
