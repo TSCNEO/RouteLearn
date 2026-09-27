@@ -95,9 +95,7 @@ def test_setup_agent_auth_and_idempotent_ingest() -> None:
 
 def test_router_and_policy_management() -> None:
     with TestClient(app) as client:
-        client.post(
-            "/api/v1/auth/login", json={"username": "admin", "password": "a-long-password-123"}
-        )
+        client.post("/api/v1/auth/login", json={"username": "admin", "password": "a-long-password-123"})
         csrf = client.cookies["routelearn_csrf"]
         headers = {"X-CSRF-Token": csrf}
 
