@@ -530,6 +530,67 @@ def create_router(payload: RouterCreate, db: DB, _: Admin) -> dict[str, Any]:
     return {"id": item.id, "name": item.name}
 
 
+class RouterUpdate(BaseModel):
+    name: str | None = None
+    host: str | None = None
+    site: str | None = None
+    api_key: str | None = None
+    verify_tls: bool | None = None
+
+
+@app.patch("/api/v1/routers/{router_id}")
+def update_router(router_id: int, payload: RouterUpdate, db: DB, _: Admin) -> dict[str, Any]:
+    router = db.get(Router, router_id)
+    if router is None:
+        raise HTTPException(404, "Router not found")
+    if payload.name is not None and payload.name.strip():
+        router.name = payload.name.strip()
+    if payload.host is not None and payload.host.strip():
+        router.host = payload.host.strip()
+    if payload.site is not None and payload.site.strip():
+        router.site = payload.site.strip()
+    if payload.verify_tls is not None:
+        router.verify_tls = payload.verify_tls
+    if payload.api_key is not None and payload.api_key.strip():
+        router.api_key_encrypted = encrypt(payload.api_key.strip())
+    audit(db, "router.updated", router_id=router_id, name=router.name)
+    db.commit()
+    return {
+        "id": router.id,
+        "name": router.name,
+        "host": router.host,
+        "site": router.site,
+        "verify_tls": router.verify_tls,
+        "kind": router.kind,
+    }
+
+
+@app.delete("/api/v1/routers/{router_id}")
+def delete_router(router_id: int, db: DB, _: Admin) -> dict[str, str]:
+    router = db.get(Router, router_id)
+    if router is None:
+        raise HTTPException(404, "Router not found")
+    with _sync_lock:
+        policies = db.scalars(select(RoutePolicy).where(RoutePolicy.router_id == router_id)).all()
+        for p in policies:
+            try:
+                backend = UniFiBackend(router)
+                current = backend.get_managed_route(p.name)
+                if current and current.enabled:
+                    backend.set_enabled(current, False)
+            except Exception:
+                pass
+            for run in db.scalars(select(SyncRun).where(SyncRun.policy_id == p.id)).all():
+                db.delete(run)
+            db.flush()
+            db.delete(p)
+        db.flush()
+        db.delete(router)
+        audit(db, "router.deleted", router_id=router_id, name=router.name)
+        db.commit()
+    return {"status": "deleted"}
+
+
 @app.get("/api/v1/routers/{router_id}/discover")
 def discover_router(router_id: int, db: DB, _: Admin) -> dict[str, Any]:
     router = db.get(Router, router_id)
@@ -615,6 +676,30 @@ def update_policy(policy_id: int, payload: PolicyState, db: DB, _: Admin) -> dic
     with _sync_lock:
         run = reconcile(db, item, manual=payload.state != "active")
     return {"state": item.state, "sync_status": run.status}
+
+
+@app.delete("/api/v1/routes/{policy_id}")
+def delete_policy(policy_id: int, db: DB, _: Admin) -> dict[str, str]:
+    item = db.get(RoutePolicy, policy_id)
+    if item is None:
+        raise HTTPException(404, "Policy not found")
+    with _sync_lock:
+        router = db.get(Router, item.router_id)
+        if router:
+            try:
+                backend = UniFiBackend(router)
+                current = backend.get_managed_route(item.name)
+                if current and current.enabled:
+                    backend.set_enabled(current, False)
+            except Exception:
+                pass
+        for run in db.scalars(select(SyncRun).where(SyncRun.policy_id == item.id)).all():
+            db.delete(run)
+        db.flush()
+        db.delete(item)
+        audit(db, "policy.deleted", policy_id=policy_id, name=item.name)
+        db.commit()
+    return {"status": "deleted"}
 
 
 @app.get("/api/v1/routes/{policy_id}/preview")

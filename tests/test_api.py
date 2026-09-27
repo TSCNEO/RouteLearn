@@ -91,3 +91,68 @@ def test_setup_agent_auth_and_idempotent_ingest() -> None:
         assert client.get(f"/api/v1/services/{service_id}/ips").json()[0]["agents"] == ["primary-dns"]
         assert client.post(f"/api/v1/agents/{agent.json()['id']}/revoke", headers=headers).status_code == 200
         assert client.get("/api/v1/agents/config", headers=auth).status_code == 401
+
+
+def test_router_and_policy_management() -> None:
+    with TestClient(app) as client:
+        client.post(
+            "/api/v1/auth/login", json={"username": "admin", "password": "a-long-password-123"}
+        )
+        csrf = client.cookies["routelearn_csrf"]
+        headers = {"X-CSRF-Token": csrf}
+
+        # Create router
+        router_res = client.post(
+            "/api/v1/routers",
+            json={
+                "name": "TestGateway",
+                "host": "192.168.1.1",
+                "site": "default",
+                "verify_tls": False,
+                "api_key": "some-test-api-key-12345",
+            },
+            headers=headers,
+        )
+        assert router_res.status_code == 200
+        router_id = router_res.json()["id"]
+
+        # Update router
+        patch_res = client.patch(
+            f"/api/v1/routers/{router_id}",
+            json={"name": "UpdatedGateway", "site": "custom-site"},
+            headers=headers,
+        )
+        assert patch_res.status_code == 200
+        assert patch_res.json()["name"] == "UpdatedGateway"
+        assert patch_res.json()["site"] == "custom-site"
+
+        # Create service and policy
+        svc_res = client.post(
+            "/api/v1/services", json={"name": "TestSvc", "patterns": ["*.test.com"]}, headers=headers
+        )
+        svc_id = svc_res.json()["id"]
+
+        policy_res = client.post(
+            "/api/v1/routes",
+            json={
+                "service_id": svc_id,
+                "router_id": router_id,
+                "vpn_network_id": "vpn-123",
+                "vpn_name": "TestVPN",
+                "state": "learning",
+            },
+            headers=headers,
+        )
+        assert policy_res.status_code == 200
+        policy_id = policy_res.json()["id"]
+
+        # Delete policy
+        del_pol_res = client.delete(f"/api/v1/routes/{policy_id}", headers=headers)
+        assert del_pol_res.status_code == 200
+        assert del_pol_res.json()["status"] == "deleted"
+
+        # Delete router
+        del_router_res = client.delete(f"/api/v1/routers/{router_id}", headers=headers)
+        assert del_router_res.status_code == 200
+        assert del_router_res.json()["status"] == "deleted"
+        assert client.get(f"/api/v1/routers/{router_id}/discover", headers=headers).status_code == 404
